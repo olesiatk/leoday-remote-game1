@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 const COLS = 8;
 const ROWS = 16;
@@ -6,37 +6,63 @@ const CELL = 20;
 const TICK_MS = 600;
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
-const SHAPES = {
-  I: { color: '#00f0f0', rows: ['....', 'XXXX', '....', '....'] },
-  O: { color: '#f0f000', rows: ['.XX.', '.XX.', '....', '....'] },
-  T: { color: '#a000f0', rows: ['.X..', 'XXX.', '....', '....'] },
-  S: { color: '#00f000', rows: ['.XX.', 'XX..', '....', '....'] },
-  Z: { color: '#f00000', rows: ['XX..', '.XX.', '....', '....'] },
-  J: { color: '#3060f0', rows: ['X...', 'XXX.', '....', '....'] },
-  L: { color: '#f0a000', rows: ['..X.', 'XXX.', '....', '....'] },
+type ShapeKey = 'I' | 'O' | 'T' | 'S' | 'Z' | 'J' | 'L';
+type Cell = string | null;
+type Board = Cell[][];
+type GameStatus = 'playing' | 'over';
+type Action = 'left' | 'right' | 'rotate' | 'down';
+
+interface ShapeDef {
+  color: string;
+  rows: string[];
+  matrix: boolean[][];
+}
+
+interface Piece {
+  matrix: boolean[][];
+  color: string;
+  row: number;
+  col: number;
+}
+
+interface GameState {
+  board: Board;
+  piece: Piece;
+  score: number;
+  status: GameStatus;
+}
+
+const SHAPES: Record<ShapeKey, ShapeDef> = {
+  I: { color: '#00f0f0', rows: ['....', 'XXXX', '....', '....'], matrix: [] },
+  O: { color: '#f0f000', rows: ['.XX.', '.XX.', '....', '....'], matrix: [] },
+  T: { color: '#a000f0', rows: ['.X..', 'XXX.', '....', '....'], matrix: [] },
+  S: { color: '#00f000', rows: ['.XX.', 'XX..', '....', '....'], matrix: [] },
+  Z: { color: '#f00000', rows: ['XX..', '.XX.', '....', '....'], matrix: [] },
+  J: { color: '#3060f0', rows: ['X...', 'XXX.', '....', '....'], matrix: [] },
+  L: { color: '#f0a000', rows: ['..X.', 'XXX.', '....', '....'], matrix: [] },
 };
-const SHAPE_KEYS = Object.keys(SHAPES);
+const SHAPE_KEYS = Object.keys(SHAPES) as ShapeKey[];
 Object.values(SHAPES).forEach((shape) => {
   shape.matrix = shape.rows.map((row) => row.split('').map((ch) => ch === 'X'));
 });
 
-function randomShapeKey() {
+function randomShapeKey(): ShapeKey {
   return SHAPE_KEYS[Math.floor(Math.random() * SHAPE_KEYS.length)]; // NOSONAR - gameplay randomness only
 }
 
-function spawnPiece() {
+function spawnPiece(): Piece {
   const key = randomShapeKey();
   const shape = SHAPES[key];
   return { matrix: shape.matrix, color: shape.color, row: 0, col: Math.floor((COLS - 4) / 2) };
 }
 
-function emptyBoard() {
-  return Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+function emptyBoard(): Board {
+  return Array.from({ length: ROWS }, () => Array<Cell>(COLS).fill(null));
 }
 
-function rotateMatrix(matrix) {
+function rotateMatrix(matrix: boolean[][]): boolean[][] {
   const n = matrix.length;
-  const result = Array.from({ length: n }, () => Array(n).fill(false));
+  const result = Array.from({ length: n }, () => Array<boolean>(n).fill(false));
   for (let r = 0; r < n; r++) {
     for (let c = 0; c < n; c++) {
       result[c][n - 1 - r] = matrix[r][c];
@@ -45,7 +71,7 @@ function rotateMatrix(matrix) {
   return result;
 }
 
-function canPlace(board, matrix, row, col) {
+function canPlace(board: Board, matrix: boolean[][], row: number, col: number): boolean {
   for (let r = 0; r < matrix.length; r++) {
     for (let c = 0; c < matrix[r].length; c++) {
       if (!matrix[r][c]) continue;
@@ -58,7 +84,7 @@ function canPlace(board, matrix, row, col) {
   return true;
 }
 
-function lockPiece(board, piece) {
+function lockPiece(board: Board, piece: Piece): Board {
   const newBoard = board.map((row) => row.slice());
   piece.matrix.forEach((row, r) => {
     row.forEach((filled, c) => {
@@ -71,14 +97,14 @@ function lockPiece(board, piece) {
   return newBoard;
 }
 
-function clearLines(board) {
+function clearLines(board: Board): { board: Board; cleared: number } {
   const remaining = board.filter((row) => row.some((cell) => !cell));
   const cleared = ROWS - remaining.length;
-  const freshRows = Array.from({ length: cleared }, () => Array(COLS).fill(null));
+  const freshRows = Array.from({ length: cleared }, () => Array<Cell>(COLS).fill(null));
   return { board: [...freshRows, ...remaining], cleared };
 }
 
-function stepDown(state) {
+function stepDown(state: GameState): GameState {
   const { board, piece } = state;
   if (canPlace(board, piece.matrix, piece.row + 1, piece.col)) {
     return { ...state, piece: { ...piece, row: piece.row + 1 } };
@@ -91,7 +117,7 @@ function stepDown(state) {
   return { board: clearedBoard, piece: nextPiece, score, status: gameOver ? 'over' : 'playing' };
 }
 
-function buildDisplayGrid(board, piece, status) {
+function buildDisplayGrid(board: Board, piece: Piece, status: GameStatus): Board {
   const display = board.map((row) => row.slice());
   if (status !== 'playing') return display;
   piece.matrix.forEach((row, r) => {
@@ -105,12 +131,12 @@ function buildDisplayGrid(board, piece, status) {
   return display;
 }
 
-function initialState() {
+function initialState(): GameState {
   return { board: emptyBoard(), piece: spawnPiece(), score: 0, status: 'playing' };
 }
 
 export default function Tetris() {
-  const stateRef = useRef(initialState());
+  const stateRef = useRef<GameState>(initialState());
   const hoveredRef = useRef(false);
   const [, setRenderTick] = useState(0);
   const forceRender = () => setRenderTick((t) => t + 1);
@@ -124,7 +150,7 @@ export default function Tetris() {
     return () => clearInterval(interval);
   }, [stateRef.current.status]);
 
-  const moveHorizontal = (dir) => {
+  const moveHorizontal = (dir: number) => {
     const { board, piece } = stateRef.current;
     const newCol = piece.col + dir;
     if (canPlace(board, piece.matrix, piece.row, newCol)) {
@@ -150,7 +176,7 @@ export default function Tetris() {
     forceRender();
   };
 
-  const applyAction = (action) => {
+  const applyAction = (action: Action) => {
     if (stateRef.current.status !== 'playing') return;
     if (action === 'left') moveHorizontal(-1);
     else if (action === 'right') moveHorizontal(1);
@@ -159,9 +185,9 @@ export default function Tetris() {
   };
 
   useEffect(() => {
-    function handleKey(e) {
+    function handleKey(e: KeyboardEvent) {
       if (!hoveredRef.current) return;
-      const keyToAction = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'rotate', ArrowDown: 'down' };
+      const keyToAction: Record<string, Action> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'rotate', ArrowDown: 'down' };
       const action = keyToAction[e.key];
       if (!action) return;
       e.preventDefault();
@@ -229,7 +255,7 @@ export default function Tetris() {
   );
 }
 
-function cellStyle(row, col, color) {
+function cellStyle(row: number, col: number, color: Cell): CSSProperties {
   return {
     position: 'absolute',
     top: row * CELL,
@@ -242,7 +268,7 @@ function cellStyle(row, col, color) {
   };
 }
 
-const dpadStyle = {
+const dpadStyle: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(3, 32px)',
   gridTemplateRows: 'repeat(2, 32px)',
@@ -250,7 +276,7 @@ const dpadStyle = {
   alignSelf: 'center',
 };
 
-const dpadBtnStyle = {
+const dpadBtnStyle: CSSProperties = {
   background: '#21262d',
   color: '#e6edf3',
   border: '1px solid #30363d',
@@ -260,7 +286,7 @@ const dpadBtnStyle = {
   padding: 0,
 };
 
-const overOverlayStyle = {
+const overOverlayStyle: CSSProperties = {
   marginTop: '12px',
   padding: '14px',
   background: 'rgba(248, 81, 73, 0.15)',
@@ -269,7 +295,7 @@ const overOverlayStyle = {
   textAlign: 'center',
 };
 
-const btnStyle = {
+const btnStyle: CSSProperties = {
   background: '#57B12D',
   color: '#0d1117',
   border: 'none',

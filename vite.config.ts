@@ -8,7 +8,7 @@ export default defineConfig({
     federation({
       name: 'remoteGame1',
       filename: 'remoteEntry.js',
-      exposes: { './Game': './src/games/Tetris.jsx' },
+      exposes: { './Game': './src/games/Tetris.tsx' },
       shared: ['react', 'react-dom']
     })
   ],
