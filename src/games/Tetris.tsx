@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
-const COLS = 8;
+const COLS = 10;
 const ROWS = 16;
 const CELL = 20;
+const NEXT_CELL = 14;
 const TICK_MS = 600;
+const MIN_TICK_MS = 120;
+const SPEED_STEP_MS = 20;
+const NARROW_BREAKPOINT = 360;
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
 type ShapeKey = 'I' | 'O' | 'T' | 'S' | 'Z' | 'J' | 'L';
@@ -28,7 +32,9 @@ interface Piece {
 interface GameState {
   board: Board;
   piece: Piece;
+  next: Piece;
   score: number;
+  linesCleared: number;
   status: GameStatus;
 }
 
@@ -105,16 +111,21 @@ function clearLines(board: Board): { board: Board; cleared: number } {
 }
 
 function stepDown(state: GameState): GameState {
-  const { board, piece } = state;
+  const { board, piece, next } = state;
   if (canPlace(board, piece.matrix, piece.row + 1, piece.col)) {
     return { ...state, piece: { ...piece, row: piece.row + 1 } };
   }
   const locked = lockPiece(board, piece);
   const { board: clearedBoard, cleared } = clearLines(locked);
   const score = state.score + LINE_SCORES[cleared];
-  const nextPiece = spawnPiece();
-  const gameOver = !canPlace(clearedBoard, nextPiece.matrix, nextPiece.row, nextPiece.col);
-  return { board: clearedBoard, piece: nextPiece, score, status: gameOver ? 'over' : 'playing' };
+  const linesCleared = state.linesCleared + cleared;
+  const upcoming = spawnPiece();
+  const gameOver = !canPlace(clearedBoard, next.matrix, next.row, next.col);
+  return { board: clearedBoard, piece: next, next: upcoming, score, linesCleared, status: gameOver ? 'over' : 'playing' };
+}
+
+function tickIntervalFor(linesCleared: number): number {
+  return Math.max(MIN_TICK_MS, TICK_MS - linesCleared * SPEED_STEP_MS);
 }
 
 function buildDisplayGrid(board: Board, piece: Piece, status: GameStatus): Board {
@@ -132,13 +143,15 @@ function buildDisplayGrid(board: Board, piece: Piece, status: GameStatus): Board
 }
 
 function initialState(): GameState {
-  return { board: emptyBoard(), piece: spawnPiece(), score: 0, status: 'playing' };
+  return { board: emptyBoard(), piece: spawnPiece(), next: spawnPiece(), score: 0, linesCleared: 0, status: 'playing' };
 }
 
 export default function Tetris() {
   const stateRef = useRef<GameState>(initialState());
   const hoveredRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [, setRenderTick] = useState(0);
+  const [isNarrow, setIsNarrow] = useState(false);
   const forceRender = () => setRenderTick((t) => t + 1);
 
   useEffect(() => {
@@ -146,9 +159,20 @@ export default function Tetris() {
     const interval = setInterval(() => {
       stateRef.current = stepDown(stateRef.current);
       forceRender();
-    }, TICK_MS);
+    }, tickIntervalFor(stateRef.current.linesCleared));
     return () => clearInterval(interval);
-  }, [stateRef.current.status]);
+  }, [stateRef.current.status, stateRef.current.linesCleared]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      setIsNarrow(width < NARROW_BREAKPOINT);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const moveHorizontal = (dir: number) => {
     const { board, piece } = stateRef.current;
@@ -202,11 +226,12 @@ export default function Tetris() {
     forceRender();
   };
 
-  const { board, piece, score, status } = stateRef.current;
+  const { board, piece, next, score, status } = stateRef.current;
   const display = buildDisplayGrid(board, piece, status);
 
   return (
     <div
+      ref={containerRef}
       style={{ fontFamily: "'Source Sans Pro', sans-serif" }}
       onMouseEnter={() => { hoveredRef.current = true; }}
       onMouseLeave={() => { hoveredRef.current = false; }}
@@ -216,7 +241,7 @@ export default function Tetris() {
         ← → move · ↑ rotate · ↓ drop faster · Score: {score}
       </p>
 
-      <div style={{ display: 'flex', gap: '12px' }}>
+      <div style={{ display: 'flex', flexDirection: isNarrow ? 'column' : 'row', gap: '12px' }}>
         <div
           style={{
             position: 'relative',
@@ -234,13 +259,26 @@ export default function Tetris() {
           )}
         </div>
 
-        <div style={dpadStyle}>
-          <div />
-          <button style={dpadBtnStyle} onClick={() => applyAction('rotate')} aria-label="Rotate">⟳</button>
-          <div />
-          <button style={dpadBtnStyle} onClick={() => applyAction('left')} aria-label="Move left">◀</button>
-          <button style={dpadBtnStyle} onClick={() => applyAction('down')} aria-label="Drop faster">▼</button>
-          <button style={dpadBtnStyle} onClick={() => applyAction('right')} aria-label="Move right">▶</button>
+        <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: COLS * CELL }}>
+          <div>
+            <p style={nextLabelStyle}>Next</p>
+            <div style={nextPreviewStyle}>
+              {next.matrix.map((row, r) =>
+                row.map((filled, c) => filled && (
+                  <div key={`${r}-${c}`} style={nextCellStyle(r, c, next.color)} />
+                ))
+              )}
+            </div>
+          </div>
+
+          <div style={dpadStyle}>
+            <div />
+            <button type="button" style={dpadBtnStyle} onClick={() => applyAction('rotate')} aria-label="Rotate">⟳</button>
+            <div />
+            <button type="button" style={dpadBtnStyle} onClick={() => applyAction('left')} aria-label="Move left">◀</button>
+            <button type="button" style={dpadBtnStyle} onClick={() => applyAction('down')} aria-label="Drop faster">▼</button>
+            <button type="button" style={dpadBtnStyle} onClick={() => applyAction('right')} aria-label="Move right">▶</button>
+          </div>
         </div>
       </div>
 
@@ -248,7 +286,7 @@ export default function Tetris() {
         <div style={overOverlayStyle}>
           <div style={{ fontSize: '36px' }}>💀📉</div>
           <p style={{ margin: '6px 0', fontWeight: 700 }}>Game over! Score: {score}</p>
-          <button style={btnStyle} onClick={resetGame}>Try again</button>
+          <button type="button" style={btnStyle} onClick={resetGame}>Try again</button>
         </div>
       )}
     </div>
@@ -267,6 +305,37 @@ function cellStyle(row: number, col: number, color: Cell): CSSProperties {
     background: color || 'transparent',
   };
 }
+
+function nextCellStyle(row: number, col: number, color: string): CSSProperties {
+  return {
+    position: 'absolute',
+    top: row * NEXT_CELL,
+    left: col * NEXT_CELL,
+    width: NEXT_CELL,
+    height: NEXT_CELL,
+    boxSizing: 'border-box',
+    border: '1px solid #21262d',
+    background: color,
+  };
+}
+
+const nextLabelStyle: CSSProperties = {
+  color: '#8b949e',
+  fontSize: '11px',
+  margin: '0 0 4px 0',
+  textAlign: 'center',
+};
+
+const nextPreviewStyle: CSSProperties = {
+  position: 'relative',
+  width: NEXT_CELL * 4,
+  height: NEXT_CELL * 4,
+  background: '#0d1117',
+  border: '1px solid #30363d',
+  borderRadius: '6px',
+  overflow: 'hidden',
+  flexShrink: 0,
+};
 
 const dpadStyle: CSSProperties = {
   display: 'grid',
